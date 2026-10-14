@@ -1,85 +1,279 @@
-# Mosaic Guard
+<div align="center">
 
-**Open-source inference authorization for AI agents.**
+# MOSAIC GUARD
 
-Mosaic Guard explores a missing authorization layer between **data access** and **derived knowledge**.
+### Inference authorization for AI agents.
 
-Traditional access control asks whether an agent may read a source or perform an action. Mosaic Guard asks a different question:
+[![Tests](https://github.com/SarashaElion/mosaic-guard/actions/workflows/test.yml/badge.svg)](https://github.com/SarashaElion/mosaic-guard/actions/workflows/test.yml)
+![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
+![Status](https://img.shields.io/badge/status-v0.1%20alpha-orange)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
-> **What becomes newly inferable when another piece of permitted information enters the context, and is the agent authorized to cross that inference boundary?**
+[Quickstart](#-quickstart) · [The Problem](#-the-problem) · [How It Works](#-how-it-works) · [IBP](docs/inference-boundaries.md) · [Threat Model](docs/threat-model.md) · [Benchmark](benchmarks/README.md)
 
-## Status
+</div>
 
-Mosaic Guard is an early reference implementation and research project for the proposed **Inference Boundary Protocol (IBP)**.
+---
 
-The v0.1 goal is deliberately narrow:
+## ⚡ Quickstart
 
-1. represent context as typed information categories;
-2. represent known inference rules over combinations of those categories;
-3. compute the *new* inference classes activated by an incoming datum;
-4. evaluate those new inferences against an explicit policy; and
-5. return one of four decisions:
-   - `ALLOW`
-   - `DENY`
-   - `CONSENT_REQUIRED`
-   - `UNKNOWN`
+Clone the repository and install the reference implementation:
 
-Mosaic Guard does **not** claim to determine everything a foundation model internally knows or infers. The reference implementation operates at the system boundary, using declared context categories and policy-defined or pluggable inference detectors.
+```bash
+git clone https://github.com/SarashaElion/mosaic-guard.git
+cd mosaic-guard
+python -m pip install -e ".[dev]"
+```
 
-## Core idea
+Create a guard from the example policy:
 
-Let `C_t` be the accumulated context at time `t`, and let `I(C)` denote the inference frontier: the set of inference classes reasonably derivable from context `C`.
+```python
+from mosaic_guard import MosaicGuard
+
+guard = MosaicGuard("policies/example.yaml")
+
+result = guard.evaluate(
+    existing_context=["calendar", "location_history"],
+    incoming_context="purchase_history",
+)
+
+print(result.decision.value)
+print(sorted(result.newly_inferable))
+```
+
+Output:
+
+```text
+CONSENT_REQUIRED
+['medical_condition']
+```
+
+The calendar, location history, and purchase history were each individually permitted context categories. Their combination crossed a declared inference boundary.
+
+---
+
+## 🧩 The Problem
+
+Traditional authorization asks:
+
+> **May this agent access this data?**
+
+Mosaic Guard asks the next question:
+
+> **What becomes newly inferable when another piece of permitted information enters the context — and was that inference authorized?**
+
+A system can be permitted to access several individually innocuous sources while their combination exposes a substantially more sensitive fact.
+
+```text
+calendar ───────────┐
+                    │
+location_history ───┼──► combined context ───► medical_condition
+                    │
+purchase_history ───┘
+```
+
+No single source necessarily crosses the boundary.
+
+**The combination does.**
+
+Mosaic Guard is an open-source reference implementation for detecting and governing that transition.
+
+---
+
+## 🛡️ Basic Boundary Check
+
+Mosaic Guard sits between accumulated context and downstream agent behavior.
+
+```text
+existing context
+      +
+incoming context
+      │
+      ▼
+inference frontier
+      │
+      ▼
+newly inferable classes
+      │
+      ▼
+policy boundary
+      │
+      ├── ALLOW
+      ├── CONSENT_REQUIRED
+      ├── DENY
+      └── UNKNOWN
+```
+
+The reference API is intentionally small:
+
+```python
+result = guard.evaluate(
+    existing_context=["work_calendar", "org_chart"],
+    incoming_context="recruiter_correspondence",
+)
+
+result.decision
+result.newly_inferable
+result.reasons
+```
+
+The guard evaluates the **change in inferability**, not merely the incoming datum.
+
+---
+
+## 🧠 How It Works
+
+Let `C_t` be the accumulated context at time `t`, and let `I(C)` denote the **inference frontier**: the set of declared inference classes derivable from context `C`.
 
 When new information `d` enters context:
 
 ```text
-ΔI = I(C_t ∪ {d}) − I(C_t)
+before = I(C_t)
+after  = I(C_t ∪ {d})
+ΔI     = after - before
 ```
 
 Mosaic Guard evaluates `ΔI` against an inference-boundary policy.
 
-This makes privacy and authorization partly a property of **knowledge emergence**, not only data possession.
+This reframes privacy and authorization as partly a property of **knowledge emergence**, not only data possession.
 
-## Why this exists
+### Decision semantics
 
-A system may be permitted to access several individually innocuous sources while their combination enables a sensitive inference the user never intended to authorize.
+| Decision | Meaning |
+| --- | --- |
+| `ALLOW` | No new boundary was crossed, or every new inference is explicitly allowed. |
+| `CONSENT_REQUIRED` | A restricted inference became newly available and requires explicit consent. |
+| `DENY` | A prohibited inference became newly available. |
+| `UNKNOWN` | A new inference is not classified by policy; it is not silently treated as safe. |
 
-Examples include combinations that reveal or strongly suggest:
+Decision precedence is:
 
-- a medical condition,
-- an intimate relationship,
-- religious or political affiliation,
-- employment instability,
-- financial distress,
-- identity or location patterns.
+```text
+DENY > CONSENT_REQUIRED > UNKNOWN > ALLOW
+```
 
-Mosaic Guard provides a place to formalize and test that transition.
+---
 
-## Repository direction
+## 📜 Inference Boundary Protocol
 
-This repository will contain:
+Mosaic Guard is the reference implementation.
 
-- the IBP policy/schema proposal;
-- a Python reference implementation;
-- a context ledger;
-- an inference-frontier engine;
-- policy evaluation;
-- synthetic mosaic-effect benchmarks;
-- integration examples for agent and tool systems.
+The underlying proposed specification is the **Inference Boundary Protocol (IBP)**.
 
-## Design principles
+A minimal policy looks like this:
 
-- **Model-agnostic** — enforcement should not depend on hidden chain-of-thought.
-- **Purpose-bound** — authorization can differ by declared task or purpose.
+```yaml
+version: "0.1"
+
+purpose:
+  id: trip_planning
+
+allowed_inferences:
+  - travel_availability
+
+restricted_inferences:
+  - medical_condition
+  - employment_instability
+
+denied_inferences:
+  - biometric_identity
+
+rules:
+  - id: medical-mosaic
+    when_all:
+      - calendar
+      - location_history
+      - purchase_history
+    infer:
+      - medical_condition
+```
+
+See the [IBP v0.1 draft](docs/inference-boundaries.md) and the [JSON Schema](schema/inference-boundary.schema.json).
+
+---
+
+## 🔬 What v0.1 Actually Claims
+
+Mosaic Guard **does not** claim to determine everything a foundation model internally knows or infers.
+
+The v0.1 reference implementation operates at the system boundary using:
+
+- declared context categories;
+- explicit or pluggable inference rules;
+- auditable frontier deltas;
+- purpose-bound policy evaluation.
+
+It does not require or inspect hidden chain-of-thought.
+
+That constraint is intentional. The project is testing whether **inference authorization itself** can become a useful, portable systems primitive.
+
+Future frontier detectors may be rule-based, graph-based, classifier-based, information-theoretic, model-assisted, or hybrid while preserving the same authorization interface.
+
+---
+
+## 🧪 Benchmark Seed
+
+The repository includes synthetic cases where individually permitted context categories combine into a policy-sensitive inference.
+
+Example:
+
+```json
+{
+  "existing_context": ["calendar", "location_history"],
+  "incoming_context": "purchase_history",
+  "expected_new_inferences": ["medical_condition"],
+  "expected_decision": "CONSENT_REQUIRED"
+}
+```
+
+The seed benchmark is deliberately small. Its purpose is to make the primitive falsifiable before scaling the research surface.
+
+See [`benchmarks/`](benchmarks/).
+
+---
+
+## 🧭 Design Principles
+
+- **Model-agnostic** — enforcement should not depend on private model reasoning.
+- **Purpose-bound** — authorization can differ by declared purpose.
 - **Compositional** — combinations matter, not just individual records.
 - **Auditable** — boundary decisions should be inspectable.
-- **Consent-aware** — sensitive inference can trigger explicit consent rather than silent continuation.
-- **Fail-visible** — uncertainty should surface as `UNKNOWN`, not be silently treated as safe.
+- **Consent-aware** — sensitive inference can trigger renewed permission.
+- **Fail-visible** — uncertainty surfaces as `UNKNOWN`.
+- **Minimal first** — establish the primitive before expanding the machinery.
+
+---
+
+## 🗺️ Repository Map
+
+```text
+mosaic_guard/     Python reference implementation
+policies/         Example inference-boundary policies
+schema/           IBP JSON Schema
+docs/             Concepts, protocol draft, and threat model
+benchmarks/       Synthetic mosaic-effect cases
+examples/         Minimal usage examples
+tests/            Decision and frontier tests
+```
+
+---
+
+## 🌱 Status
+
+Mosaic Guard is early-stage experimental security/privacy infrastructure.
+
+The current question is not whether v0.1 solves inference privacy.
+
+It is whether this primitive is coherent enough to test:
+
+> **Can authorization govern not only what an intelligent system may access, but what it may become able to infer from what it was allowed to access?**
+
+That is the research program.
+
+---
 
 ## License
 
 Apache License 2.0.
 
----
-
-Mosaic Guard is experimental security/privacy infrastructure. It should not be treated as a complete privacy guarantee or a substitute for legal, security, or governance review.
+Mosaic Guard is experimental infrastructure. It should not be treated as a complete privacy guarantee or a substitute for legal, security, or governance review.
