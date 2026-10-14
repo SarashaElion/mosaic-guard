@@ -1,0 +1,47 @@
+version: "0.1"
+
+purpose:
+  id: trip_planning
+
+allowed_inferences:
+  - travel_availability
+  - likely_destination_preferences
+  - approximate_budget
+
+restricted_inferences:
+  - medical_condition
+  - employment_instability
+  - financial_distress
+  - intimate_relationship
+  - religious_affiliation
+  - political_affiliation
+
+denied_inferences:
+  - biometric_identity
+
+rules:
+  - id: travel-availability
+    description: Calendar and location patterns can make travel availability inferable.
+    when_all:
+      - calendar
+      - location_history
+    infer:
+      - travel_availability
+
+  - id: medical-mosaic
+    description: Calendar, location, and purchase patterns can jointly expose a medical condition.
+    when_all:
+      - calendar
+      - location_history
+      - purchase_history
+    infer:
+      - medical_condition
+
+  - id: employment-mosaic
+    description: Work context plus recruiter correspondence can expose employment instability.
+    when_all:
+      - work_calendar
+      - org_chart
+      - recruiter_correspondence
+    infer:
+      - employment_instability

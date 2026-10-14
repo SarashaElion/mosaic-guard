@@ -1,0 +1,4 @@
+{"id":"travel-001","existing_context":["calendar"],"incoming_context":"location_history","expected_new_inferences":["travel_availability"],"expected_decision":"ALLOW"}
+{"id":"medical-001","existing_context":["calendar","location_history"],"incoming_context":"purchase_history","expected_new_inferences":["medical_condition"],"expected_decision":"CONSENT_REQUIRED"}
+{"id":"employment-001","existing_context":["work_calendar","org_chart"],"incoming_context":"recruiter_correspondence","expected_new_inferences":["employment_instability"],"expected_decision":"CONSENT_REQUIRED"}
+{"id":"none-001","existing_context":["calendar"],"incoming_context":"purchase_history","expected_new_inferences":[],"expected_decision":"ALLOW"}
